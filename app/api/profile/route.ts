@@ -1,0 +1,2 @@
+import {env} from 'cloudflare:workers';import {json,me} from '../../../lib/store';
+export async function PATCH(req:Request){const user=await me();if(!user)return json({error:'Sign in first.'},401);const {name}=await req.json() as {name?:string},clean=(name??'').trim();if(clean.length<2||clean.length>30)return json({error:'Use a name from 2–30 characters.'},400);await env.DB.prepare('UPDATE users SET name=? WHERE id=?').bind(clean,user.id).run();return json({user:{...user,name:clean}})}

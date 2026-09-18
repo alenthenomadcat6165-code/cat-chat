@@ -1,0 +1,1 @@
+import {env} from 'cloudflare:workers';export async function GET(_:Request,{params}:{params:Promise<{key:string}>}){const {key}=await params,obj=await env.FILES.get(`avatars/${key}`);if(!obj)return new Response('Not found',{status:404});return new Response(obj.body,{headers:{'content-type':obj.httpMetadata?.contentType??'image/jpeg','cache-control':'public,max-age=3600'}})}
