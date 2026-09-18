@@ -11,7 +11,7 @@ export async function setup(){await env.DB.batch([
  env.DB.prepare('CREATE TABLE IF NOT EXISTS conversation_members (conversation_id INTEGER NOT NULL, user_id INTEGER NOT NULL, PRIMARY KEY(conversation_id,user_id))'),
  env.DB.prepare('CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY AUTOINCREMENT, reporter_id INTEGER NOT NULL, message_id INTEGER NOT NULL, reason TEXT NOT NULL, created_at INTEGER NOT NULL)')
 ])}
-export async function me(){const jar=await cookies(),token=jar.get('cat_session')?.value;if(!token)return null;return env.DB.prepare('SELECT users.id,users.username,users.name,users.avatar_key AS avatarKey,users.role,users.banned FROM sessions JOIN users ON users.id=sessions.user_id WHERE sessions.token=? AND sessions.expires_at>?').bind(token,Date.now()).first<{id:number;username:string;name:string;avatarKey:string|null;role:string;banned:number}>()}
-export function session(token:string){return `cat_session=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`}
-export function clearSession(){return 'cat_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0'}
+export async function me(){const jar=await cookies(),token=jar.get('cat_session_v2')?.value;if(!token)return null;return env.DB.prepare('SELECT users.id,users.username,users.name,users.avatar_key AS avatarKey,users.role,users.banned FROM sessions JOIN users ON users.id=sessions.user_id WHERE sessions.token=? AND sessions.expires_at>?').bind(token,Date.now()).first<{id:number;username:string;name:string;avatarKey:string|null;role:string;banned:number}>()}
+export function session(token:string,remember=false){return `cat_session_v2=${token}; Path=/; HttpOnly; Secure; SameSite=Lax${remember?'; Max-Age=2592000':''}`}
+export function clearSession(){return 'cat_session_v2=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0'}
 export {bytes};
