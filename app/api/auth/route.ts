@@ -16,15 +16,18 @@ export async function POST(req:Request){
   if(name.length<2||name.length>30)return json({error:'Enter a display name.'},400);
   const salt=bytes(16),passwordHash=await hash(password,salt);
   try{
-   const count=await env.DB.prepare('SELECT COUNT(*) AS n FROM users').first<{n:number}>(),role=Number(count?.n??0)===0?'creator':'member';
+   const role='member';
    const result=await env.DB.prepare('INSERT INTO users(username,name,password_hash,salt,role,created_at) VALUES(?,?,?,?,?,?)').bind(username,name,passwordHash,salt,role,Date.now()).run();
    user={id:Number(result.meta.last_row_id),username,name,avatarKey:null,role,banned:0};
   }catch{return json({error:'That username is already used.'},409)}
  }else{
-  const row=await env.DB.prepare('SELECT id,username,name,avatar_key AS avatarKey,role,banned,password_hash AS passwordHash,salt FROM users WHERE username=?').bind(username).first<any>();
+  const row=await env.DB.prepare('SELECT id,username,name,avatar_key AS avatarKey,role,banned,account_status AS accountStatus,suspended_until AS suspendedUntil,password_hash AS passwordHash,salt FROM users WHERE username=?').bind(username).first<any>();
   if(!row||await hash(password,row.salt)!==row.passwordHash)return json({error:'Username or password is wrong.'},401);
-  if(row.banned)return json({error:'This account was paused by the creator.'},403);
-  user={id:row.id,username:row.username,name:row.name,avatarKey:row.avatarKey,role:row.role,banned:row.banned};
+  if(row.accountStatus==='suspended'&&row.suspendedUntil&&row.suspendedUntil<=Date.now()){await env.DB.prepare("UPDATE users SET account_status='active',suspended_until=NULL WHERE id=?").bind(row.id).run();row.accountStatus='active';row.suspendedUntil=null}
+  if(row.banned||row.accountStatus==='banned')return json({error:'This account has been banned.'},403);
+  if(row.accountStatus==='paused')return json({error:'This account is paused. Ask a staff member for help.'},403);
+  if(row.accountStatus==='suspended')return json({error:`This account is suspended until ${new Date(row.suspendedUntil).toLocaleString()}.`},403);
+  user={id:row.id,username:row.username,name:row.name,avatarKey:row.avatarKey,role:row.role,banned:row.banned,accountStatus:row.accountStatus,suspendedUntil:row.suspendedUntil};
  }
  const token=bytes();
  await env.DB.prepare('INSERT INTO sessions(token,user_id,expires_at) VALUES(?,?,?)').bind(token,user.id,Date.now()+2592000000).run();
