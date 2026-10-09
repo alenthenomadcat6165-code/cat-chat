@@ -1,7 +1,16 @@
 import {env} from 'cloudflare:workers';
-import {isStaff,json,me,setup} from '../../../lib/store';
+import {clearSession,isStaff,json,me,setup} from '../../../lib/store';
+import {checkMessageSafety} from '../../../lib/content-safety';
+import {checkInlineSpam,checkSpam,permanentlyBanForSpam} from '../../../lib/spam-safety';
 
 async function allowed(uid:number,cid:number){return cid===1||!!await env.DB.prepare('SELECT 1 FROM conversation_members WHERE conversation_id=? AND user_id=?').bind(cid,uid).first()}
+
+async function spamResponse(user:{id:number;role:string},text:string,withHistory=true){
+ const result=withHistory?await checkSpam(user.id,text):checkInlineSpam(text);
+ if(!result.spam)return null;
+ const banned=await permanentlyBanForSpam(user,result.reason);
+ return json({error:banned?'This account was permanently banned for repeated spam.':'That message looks like spam and was not sent.',blocked:true},banned?403:429,banned?{'Set-Cookie':clearSession()}:{});
+}
 
 export async function GET(req:Request){
  await setup();
@@ -13,9 +22,9 @@ export async function GET(req:Request){
  return json({messages:r.results});
 }
 
-export async function POST(req:Request){const user=await me();if(!user)return json({error:'Open the site again.'},401);const {body,conversationId=1}=await req.json() as {body?:string;conversationId?:number};if(!await allowed(user.id,conversationId))return json({error:'Not in this chat.'},403);const text=(body??'').trim();if(!text||text.length>500)return json({error:'Write 1–500 characters.'},400);const r=await env.DB.prepare('INSERT INTO messages(user_id,body,created_at,conversation_id) VALUES(?,?,?,?)').bind(user.id,text,Date.now(),conversationId).run();return json({id:r.meta.last_row_id})}
+export async function POST(req:Request){const user=await me();if(!user)return json({error:'Open the site again.'},401);const {body,conversationId=1}=await req.json() as {body?:string;conversationId?:number};if(!await allowed(user.id,conversationId))return json({error:'Not in this chat.'},403);const text=(body??'').trim();if(!text||text.length>500)return json({error:'Write 1–500 characters.'},400);const spam=await spamResponse(user,text);if(spam)return spam;const safety=checkMessageSafety(text);if(!safety.allowed)return json({error:safety.message,blocked:true},422);const r=await env.DB.prepare('INSERT INTO messages(user_id,body,created_at,conversation_id) VALUES(?,?,?,?)').bind(user.id,text,Date.now(),conversationId).run();return json({id:r.meta.last_row_id})}
 
-export async function PATCH(req:Request){const user=await me();if(!user)return json({error:'Sign in first.'},401);const {id,body}=await req.json() as {id?:number;body?:string};const text=(body??'').trim();if(!id||!text||text.length>500)return json({error:'Write 1–500 characters.'},400);const r=await env.DB.prepare('UPDATE messages SET body=?,edited_at=? WHERE id=? AND user_id=? AND deleted_at IS NULL').bind(text,Date.now(),id,user.id).run();if(!r.meta.changes)return json({error:'You can only edit your own message.'},403);return json({ok:true})}
+export async function PATCH(req:Request){const user=await me();if(!user)return json({error:'Sign in first.'},401);const {id,body}=await req.json() as {id?:number;body?:string};const text=(body??'').trim();if(!id||!text||text.length>500)return json({error:'Write 1–500 characters.'},400);const spam=await spamResponse(user,text,false);if(spam)return spam;const safety=checkMessageSafety(text);if(!safety.allowed)return json({error:safety.message,blocked:true},422);const r=await env.DB.prepare('UPDATE messages SET body=?,edited_at=? WHERE id=? AND user_id=? AND deleted_at IS NULL').bind(text,Date.now(),id,user.id).run();if(!r.meta.changes)return json({error:'You can only edit your own message.'},403);return json({ok:true})}
 
 export async function DELETE(req:Request){
  const user=await me();

@@ -1,5 +1,5 @@
 import {env} from 'cloudflare:workers';
-import {json,me} from '../../../lib/store';
+import {isStaff,json,me} from '../../../lib/store';
 
 async function isMember(userId:number,conversationId:number){
  return !!await env.DB.prepare('SELECT 1 FROM conversation_members WHERE conversation_id=? AND user_id=?').bind(conversationId,userId).first();
@@ -11,10 +11,10 @@ export async function GET(req:Request){
  const conversationId=Number(new URL(req.url).searchParams.get('conversationId'));
  if(!conversationId||conversationId===1)return json({error:'Choose a group or private chat.'},400);
  if(!await isMember(user.id,conversationId))return json({error:'You are not in this chat.'},403);
- const chat=await env.DB.prepare('SELECT id,name,type,created_by AS createdBy,created_at AS createdAt FROM conversations WHERE id=?').bind(conversationId).first();
+ const chat=await env.DB.prepare('SELECT id,name,type,created_by AS createdBy,created_at AS createdAt FROM conversations WHERE id=?').bind(conversationId).first<{id:number;name:string;type:string;createdBy:number;createdAt:number}>();
  if(!chat)return json({error:'Chat not found.'},404);
- const members=await env.DB.prepare(`SELECT users.id,users.name,users.avatar_key AS avatarKey,users.role FROM conversation_members JOIN users ON users.id=conversation_members.user_id WHERE conversation_members.conversation_id=? ORDER BY users.name COLLATE NOCASE`).bind(conversationId).all();
- return json({chat,members:members.results});
+ const members=await env.DB.prepare(`SELECT users.id,users.name,users.avatar_key AS avatarKey,users.role FROM conversation_members JOIN users ON users.id=conversation_members.user_id WHERE conversation_members.conversation_id=? AND users.banned=0 AND users.account_status!='banned' ORDER BY users.name COLLATE NOCASE`).bind(conversationId).all();
+ return json({chat,members:members.results,meId:user.id,canManageMembers:chat.createdBy===user.id||isStaff(user.role)});
 }
 
 export async function POST(req:Request){
@@ -36,14 +36,25 @@ export async function POST(req:Request){
 export async function PATCH(req:Request){
  const user=await me();
  if(!user)return json({error:'Open the site again.'},401);
- const b=await req.json() as {conversationId?:number;memberIds?:number[]};
+ const b=await req.json() as {conversationId?:number;memberIds?:number[];action?:'add'|'remove'};
  const conversationId=Number(b.conversationId);
  if(!conversationId||conversationId===1)return json({error:'Everyone is already in the main school chat.'},400);
  if(!await isMember(user.id,conversationId))return json({error:'You are not in this chat.'},403);
- const chat=await env.DB.prepare('SELECT id,name,type FROM conversations WHERE id=?').bind(conversationId).first<{id:number;name:string;type:string}>();
+ const chat=await env.DB.prepare('SELECT id,name,type,created_by AS createdBy FROM conversations WHERE id=?').bind(conversationId).first<{id:number;name:string;type:string;createdBy:number}>();
  if(!chat)return json({error:'Chat not found.'},404);
  const requested=Array.from(new Set((b.memberIds??[]).map(Number).filter(x=>x>0&&x!==user.id))).slice(0,49);
  if(!requested.length)return json({error:'Choose at least one person.'},400);
+ if(b.action==='remove'){
+  if(chat.createdBy!==user.id&&!isStaff(user.role))return json({error:'Only the chat creator or staff can remove people.'},403);
+  const existing=await env.DB.prepare(`SELECT user_id AS userId FROM conversation_members WHERE conversation_id=? AND user_id IN (${requested.map(()=>'?').join(',')})`).bind(conversationId,...requested).all<{userId:number}>();
+  const removeIds=existing.results.map(row=>row.userId);
+  if(!removeIds.length)return json({error:'Those people are not in this chat.'},404);
+  await env.DB.batch(removeIds.flatMap(id=>[
+   env.DB.prepare('DELETE FROM conversation_members WHERE conversation_id=? AND user_id=?').bind(conversationId,id),
+   env.DB.prepare('DELETE FROM typing_presence WHERE conversation_id=? AND user_id=?').bind(conversationId,id)
+  ]));
+  return json({ok:true,removed:removeIds.length,chat:{id:conversationId,name:chat.name,type:chat.type}});
+ }
  const placeholders=requested.map(()=>'?').join(',');
  const allowed=await env.DB.prepare(`SELECT id FROM users WHERE id IN (${placeholders}) AND banned=0 AND account_status='active'`).bind(...requested).all<{id:number}>();
  const activeIds=allowed.results.map(x=>x.id);

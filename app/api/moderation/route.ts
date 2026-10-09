@@ -7,7 +7,7 @@ export async function GET(){
  await setup();
  const actor=await me();
  if(!actor||!isStaff(actor.role))return json({error:'Staff access only.'},403);
- const users=await env.DB.prepare(`SELECT id,username,name,avatar_key AS avatarKey,role,account_status AS accountStatus,suspended_until AS suspendedUntil,warnings_count AS warningsCount,created_at AS createdAt FROM users ORDER BY CASE role WHEN 'founder' THEN 0 WHEN 'admin' THEN 1 WHEN 'secretary' THEN 2 WHEN 'staff' THEN 3 ELSE 4 END,name COLLATE NOCASE`).all();
+ const users=await env.DB.prepare(`SELECT id,username,name,avatar_key AS avatarKey,role,account_status AS accountStatus,suspended_until AS suspendedUntil,warnings_count AS warningsCount,created_at AS createdAt FROM users WHERE banned=0 AND account_status!='banned' ORDER BY created_at ASC,id ASC`).all();
  return json({me:{id:actor.id,role:normalizedRole(actor.role)},users:users.results});
 }
 
@@ -79,7 +79,9 @@ export async function PATCH(req:Request){
   return json({ok:true,message:`${target.name} is banned.`});
  }
  if(action==='restore'){
-  if(roleRank(actorRole)<3)return json({error:'Only admins can restore accounts.'},403);
+  if(target.accountStatus==='banned')return json({error:'Bans are permanent and cannot be removed.'},403);
+  if(!['paused','suspended'].includes(target.accountStatus))return json({error:'This account is already active.'},409);
+  if(actorRole==='staff'&&target.accountStatus!=='suspended')return json({error:'Staff/Orderly can only restore suspended accounts.'},403);
   await env.DB.batch([
    env.DB.prepare("UPDATE users SET account_status='active',suspended_until=NULL,banned=0 WHERE id=?").bind(userId),
    env.DB.prepare('INSERT INTO moderation_actions(actor_id,target_id,action,details,created_at) VALUES(?,?,?,?,?)').bind(actor.id,userId,'restore','',now)

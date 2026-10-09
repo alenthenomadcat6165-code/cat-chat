@@ -1,5 +1,7 @@
 import {env} from 'cloudflare:workers';
-import {json,me,setup} from '../../../../lib/store';
+import {clearSession,json,me,setup} from '../../../../lib/store';
+import {checkMessageSafety} from '../../../../lib/content-safety';
+import {checkSpam,permanentlyBanForSpam} from '../../../../lib/spam-safety';
 
 const limits:Record<string,number>={
  'image/jpeg':8_000_000,'image/png':8_000_000,'image/webp':8_000_000,'image/gif':8_000_000,
@@ -24,6 +26,11 @@ export async function POST(req:Request){
  if(!maximum)return json({error:'Share a JPG, PNG, WebP, GIF, MP4, WebM, MOV, MP3, M4A, WAV, OGG, or PDF file.'},400);
  if(file.size<1||file.size>maximum)return json({error:`That file is too large. The limit is ${Math.round(maximum/1_000_000)} MB.`},400);
  const safeName=(file.name||'attachment').replace(/[^a-zA-Z0-9._ ()-]/g,'').slice(0,100)||'attachment';
+ const messageText=`${body} ${safeName.replace(/\.[^.]+$/,'')}`;
+ const spam=await checkSpam(user.id,messageText);
+ if(spam.spam){const banned=await permanentlyBanForSpam(user,spam.reason);return json({error:banned?'This account was permanently banned for repeated spam.':'That upload looks like spam and was not sent.',blocked:true},banned?403:429,banned?{'Set-Cookie':clearSession()}:{})}
+ const safety=checkMessageSafety(messageText);
+ if(!safety.allowed)return json({error:safety.message,blocked:true},422);
  const key=`chat-media/${user.id}-${Date.now()}-${crypto.randomUUID()}`;
  await env.FILES.put(key,await file.arrayBuffer(),{httpMetadata:{contentType:file.type},customMetadata:{name:safeName}});
  const result=await env.DB.prepare(`INSERT INTO messages(user_id,body,created_at,conversation_id,attachment_key,attachment_type,attachment_name,attachment_size) VALUES(?,?,?,?,?,?,?,?)`).bind(user.id,body,Date.now(),conversationId,key,file.type,safeName,file.size).run();
