@@ -29,13 +29,16 @@ export async function PATCH(req:Request){const user=await me();if(!user)return j
 export async function DELETE(req:Request){
  const user=await me();
  if(!user)return json({error:'Sign in first.'},401);
- const {id}=await req.json() as {id?:number};
- if(!id)return json({error:'Choose a message.'},400);
- const message=await env.DB.prepare('SELECT user_id AS userId FROM messages WHERE id=? AND deleted_at IS NULL').bind(id).first<{userId:number}>();
- if(!message)return json({error:'Message not found.'},404);
- if(message.userId!==user.id&&!isStaff(user.role))return json({error:'Only staff can delete someone else’s message.'},403);
+ const body=await req.json() as {id?:number;ids?:number[]};
+ const ids=Array.from(new Set([...(Array.isArray(body.ids)?body.ids:[]),...(body.id?[body.id]:[])].map(Number).filter(id=>id>0))).slice(0,50);
+ if(!ids.length)return json({error:'Choose at least one message.'},400);
+ const placeholders=ids.map(()=>'?').join(',');
+ const found=await env.DB.prepare(`SELECT id,user_id AS userId FROM messages WHERE id IN (${placeholders}) AND deleted_at IS NULL`).bind(...ids).all<{id:number;userId:number}>();
+ if(!found.results.length)return json({error:'Those messages were already deleted or could not be found.'},404);
+ if(!isStaff(user.role)&&found.results.some(message=>message.userId!==user.id))return json({error:'Only staff can delete someone else’s message.'},403);
  const now=Date.now();
- await env.DB.prepare('UPDATE messages SET deleted_at=? WHERE id=? AND deleted_at IS NULL').bind(now,id).run();
- if(message.userId!==user.id)await env.DB.prepare('INSERT INTO moderation_actions(actor_id,target_id,action,details,created_at) VALUES(?,?,?,?,?)').bind(user.id,message.userId,'delete_message',String(id),now).run();
- return json({ok:true});
+ const statements=[env.DB.prepare(`UPDATE messages SET deleted_at=? WHERE id IN (${found.results.map(()=>'?').join(',')}) AND deleted_at IS NULL`).bind(now,...found.results.map(message=>message.id))];
+ for(const message of found.results)if(message.userId!==user.id)statements.push(env.DB.prepare('INSERT INTO moderation_actions(actor_id,target_id,action,details,created_at) VALUES(?,?,?,?,?)').bind(user.id,message.userId,'delete_message',String(message.id),now));
+ await env.DB.batch(statements);
+ return json({ok:true,deleted:found.results.length,deletedIds:found.results.map(message=>message.id)});
 }
