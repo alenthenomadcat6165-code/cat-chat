@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS moderator_status (
+  id INTEGER PRIMARY KEY CHECK(id=1),
+  last_run_at INTEGER NOT NULL,
+  checked_count INTEGER NOT NULL DEFAULT 0,
+  removed_count INTEGER NOT NULL DEFAULT 0,
+  banned_count INTEGER NOT NULL DEFAULT 0,
+  summary TEXT NOT NULL DEFAULT ''
+);

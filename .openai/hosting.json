@@ -1,4 +1,5 @@
 {
   "d1": "DB",
-  "r2": "FILES"
+  "r2": "FILES",
+  "capabilities": ["mcp"]
 }

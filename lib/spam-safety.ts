@@ -4,12 +4,12 @@ import {normalizedRole} from './store';
 type MessageUser={id:number;role:string};
 type SpamResult={spam:false}|{spam:true;reason:string};
 
-function normalizedText(value:string){
+export function normalizedSpamText(value:string){
  return value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}\p{Emoji_Presentation}]+/gu,' ').trim().replace(/\s+/g,' ');
 }
 
 export function checkInlineSpam(text:string):SpamResult{
- const normalized=normalizedText(text);
+ const normalized=normalizedSpamText(text);
  if(!normalized)return {spam:false};
  const tokens=normalized.match(/[\p{L}\p{N}]+/gu)??[];
  if(tokens.length>=8){
@@ -42,9 +42,9 @@ export async function checkSpam(userId:number,text:string):Promise<SpamResult>{
  const rows=await env.DB.prepare('SELECT body,created_at AS createdAt FROM messages WHERE user_id=? AND created_at>? ORDER BY created_at DESC LIMIT 12').bind(userId,now-120000).all<{body:string;createdAt:number}>();
  const recent=rows.results;
  if(recent.filter(row=>row.createdAt>now-15000).length>=7)return {spam:true,reason:'too many messages were sent too quickly'};
- const value=normalizedText(text);
- if(value&&recent.filter(row=>normalizedText(row.body)===value).length>=2)return {spam:true,reason:'the same message was repeatedly resent'};
- const sequence=[value,...recent.slice(0,6).map(row=>normalizedText(row.body))].filter(Boolean);
+ const value=normalizedSpamText(text);
+ if(value&&recent.filter(row=>normalizedSpamText(row.body)===value).length>=2)return {spam:true,reason:'the same message was repeatedly resent'};
+ const sequence=[value,...recent.slice(0,6).map(row=>normalizedSpamText(row.body))].filter(Boolean);
  if(sequence.length>=7&&new Set(sequence).size<=2)return {spam:true,reason:'the same messages were repeatedly resent'};
  return {spam:false};
 }
