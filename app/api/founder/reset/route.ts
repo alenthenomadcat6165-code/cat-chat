@@ -4,7 +4,7 @@ import {deleteStoredFiles,ensureProtectedChats} from '../../../../lib/protected-
 
 export async function POST(req:Request){
  const user=await me();
- if(!user||normalizedRole(user.role)!=='founder')return json({error:'Founder access only.'},403);
+ if(!user||normalizedRole(user.role)!=='founder')return json({error:'You must be the founder to use this feature.'},403);
  const body=await req.json() as {confirmation?:string};
  if(body.confirmation!=='RESET CAT THING')return json({error:'Type RESET CAT THING exactly to confirm.'},400);
  await ensureProtectedChats();
@@ -25,5 +25,5 @@ export async function POST(req:Request){
  ]);
  await ensureProtectedChats();
  await deleteStoredFiles(attachments.results.map(item=>item.attachmentKey)).catch(()=>{});
- return json({ok:true,message:`Cat Thing restarted. ${messageCount?.count??0} messages and ${chatCount?.count??0} rooms were cleared. Every account was preserved.`});
+ return json({ok:true,message:`Cat Thing was restarted, which cleared ${messageCount?.count??0} messages and ${chatCount?.count??0} rooms while preserving every account.`});
 }

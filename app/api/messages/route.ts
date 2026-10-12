@@ -15,23 +15,23 @@ async function spamResponse(user:{id:number;role:string},text:string,withHistory
 export async function GET(req:Request){
  await setup();
  const user=await me();
- if(!user)return json({error:'Open the site again.'},401);
+ if(!user)return json({error:'Please open the site again before continuing.'},401);
  const u=new URL(req.url),conversationId=Number(u.searchParams.get('conversationId')??1);
- if(!await allowed(user.id,conversationId))return json({error:'Not in this room.'},403);
+ if(!await allowed(user.id,conversationId))return json({error:'You are not a member of this room.'},403);
  const r=await env.DB.prepare(`SELECT * FROM (SELECT messages.id,CASE WHEN messages.deleted_at IS NULL THEN messages.body ELSE '' END AS body,messages.created_at AS createdAt,messages.edited_at AS editedAt,messages.deleted_at AS deletedAt,CASE WHEN messages.deleted_at IS NULL THEN messages.attachment_type ELSE NULL END AS attachmentType,CASE WHEN messages.deleted_at IS NULL THEN messages.attachment_name ELSE NULL END AS attachmentName,CASE WHEN messages.deleted_at IS NULL THEN messages.attachment_size ELSE NULL END AS attachmentSize,CASE WHEN messages.deleted_at IS NULL AND messages.attachment_key IS NOT NULL THEN messages.id ELSE NULL END AS attachmentId,users.id AS userId,users.name,users.avatar_key AS avatarKey,users.role FROM messages JOIN users ON users.id=messages.user_id WHERE messages.conversation_id=? ORDER BY messages.id DESC LIMIT 200) ORDER BY id`).bind(conversationId).all();
  return json({messages:r.results});
 }
 
-export async function POST(req:Request){const user=await me();if(!user)return json({error:'Open the site again.'},401);const {body,conversationId=1}=await req.json() as {body?:string;conversationId?:number};if(!await allowed(user.id,conversationId))return json({error:'Not in this room.'},403);const text=(body??'').trim();if(!text||text.length>500)return json({error:'Write 1–500 characters.'},400);const spam=await spamResponse(user,text);if(spam)return spam;const safety=checkMessageSafety(text);if(!safety.allowed)return json({error:safety.message,blocked:true},422);const r=await env.DB.prepare('INSERT INTO messages(user_id,body,created_at,conversation_id) VALUES(?,?,?,?)').bind(user.id,text,Date.now(),conversationId).run();return json({id:r.meta.last_row_id})}
+export async function POST(req:Request){const user=await me();if(!user)return json({error:'Please open the site again before continuing.'},401);const {body,conversationId=1}=await req.json() as {body?:string;conversationId?:number};if(!await allowed(user.id,conversationId))return json({error:'You are not a member of this room.'},403);const text=(body??'').trim();if(!text||text.length>500)return json({error:'Please write between 1 and 500 characters.'},400);const spam=await spamResponse(user,text);if(spam)return spam;const safety=checkMessageSafety(text);if(!safety.allowed)return json({error:safety.message,blocked:true},422);const r=await env.DB.prepare('INSERT INTO messages(user_id,body,created_at,conversation_id) VALUES(?,?,?,?)').bind(user.id,text,Date.now(),conversationId).run();return json({id:r.meta.last_row_id})}
 
-export async function PATCH(req:Request){const user=await me();if(!user)return json({error:'Sign in first.'},401);const {id,body}=await req.json() as {id?:number;body?:string};const text=(body??'').trim();if(!id||!text||text.length>500)return json({error:'Write 1–500 characters.'},400);const spam=await spamResponse(user,text,false);if(spam)return spam;const safety=checkMessageSafety(text);if(!safety.allowed)return json({error:safety.message,blocked:true},422);const r=await env.DB.prepare('UPDATE messages SET body=?,edited_at=? WHERE id=? AND user_id=? AND deleted_at IS NULL').bind(text,Date.now(),id,user.id).run();if(!r.meta.changes)return json({error:'You can only edit your own message.'},403);return json({ok:true})}
+export async function PATCH(req:Request){const user=await me();if(!user)return json({error:'Please sign in before continuing.'},401);const {id,body}=await req.json() as {id?:number;body?:string};const text=(body??'').trim();if(!id||!text||text.length>500)return json({error:'Please write between 1 and 500 characters.'},400);const spam=await spamResponse(user,text,false);if(spam)return spam;const safety=checkMessageSafety(text);if(!safety.allowed)return json({error:safety.message,blocked:true},422);const r=await env.DB.prepare('UPDATE messages SET body=?,edited_at=? WHERE id=? AND user_id=? AND deleted_at IS NULL').bind(text,Date.now(),id,user.id).run();if(!r.meta.changes)return json({error:'You can only edit your own message.'},403);return json({ok:true})}
 
 export async function DELETE(req:Request){
  const user=await me();
- if(!user)return json({error:'Sign in first.'},401);
+ if(!user)return json({error:'Please sign in before continuing.'},401);
  const body=await req.json() as {id?:number;ids?:number[]};
  const ids=Array.from(new Set([...(Array.isArray(body.ids)?body.ids:[]),...(body.id?[body.id]:[])].map(Number).filter(id=>id>0))).slice(0,50);
- if(!ids.length)return json({error:'Choose at least one message.'},400);
+ if(!ids.length)return json({error:'Please choose at least one message.'},400);
  const placeholders=ids.map(()=>'?').join(',');
  const found=await env.DB.prepare(`SELECT id,user_id AS userId FROM messages WHERE id IN (${placeholders}) AND deleted_at IS NULL`).bind(...ids).all<{id:number;userId:number}>();
  if(!found.results.length)return json({error:'Those messages were already deleted or could not be found.'},404);

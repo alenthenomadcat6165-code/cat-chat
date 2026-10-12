@@ -8,13 +8,13 @@ async function isMember(userId:number,conversationId:number){
 
 export async function GET(req:Request){
  const user=await me();
- if(!user)return json({error:'Open the site again.'},401);
+ if(!user)return json({error:'Please open the site again before continuing.'},401);
  await ensureProtectedChats();
  const conversationId=Number(new URL(req.url).searchParams.get('conversationId'));
- if(!conversationId||conversationId===1)return json({error:'Choose a group or private room.'},400);
+ if(!conversationId||conversationId===1)return json({error:'Please choose a group or private room.'},400);
  if(!await isMember(user.id,conversationId))return json({error:'You are not in this room.'},403);
  const chat=await env.DB.prepare('SELECT id,name,type,created_by AS createdBy,created_at AS createdAt FROM conversations WHERE id=?').bind(conversationId).first<{id:number;name:string;type:string;createdBy:number;createdAt:number}>();
- if(!chat)return json({error:'Room not found.'},404);
+ if(!chat)return json({error:'The requested room could not be found.'},404);
  const members=await env.DB.prepare(`SELECT users.id,users.name,users.avatar_key AS avatarKey,users.role FROM conversation_members JOIN users ON users.id=conversation_members.user_id WHERE conversation_members.conversation_id=? AND users.banned=0 AND users.account_status!='banned' ORDER BY users.name COLLATE NOCASE`).bind(conversationId).all();
  const protectedChat=isProtectedChat(chat.type),founderCanManage=canManageProtectedChat(user.role);
  return json({chat:{...chat,protected:protectedChat},members:members.results,meId:user.id,canAddMembers:protectedChat?founderCanManage:true,canManageMembers:protectedChat?founderCanManage:chat.createdBy===user.id||isStaff(user.role)});
@@ -22,14 +22,14 @@ export async function GET(req:Request){
 
 export async function POST(req:Request){
  const user=await me();
- if(!user)return json({error:'Open the site again.'},401);
+ if(!user)return json({error:'Please open the site again before continuing.'},401);
  const b=await req.json() as {name?:string;type?:string;memberIds?:number[]};
  const ids=Array.from(new Set((b.memberIds??[]).map(Number).filter(x=>x>0&&x!==user.id))).slice(0,49);
- if(b.type==='private'&&ids.length!==1)return json({error:'Choose one person.'},400);
- if(b.type==='group'&&!ids.length)return json({error:'Choose at least one person.'},400);
- if(!['private','group'].includes(b.type??''))return json({error:'Choose a room type.'},400);
+ if(b.type==='private'&&ids.length!==1)return json({error:'Please choose one person.'},400);
+ if(b.type==='group'&&!ids.length)return json({error:'Please choose at least one person.'},400);
+ if(!['private','group'].includes(b.type??''))return json({error:'Please choose a room type.'},400);
  const name=b.type==='private'?'Private room':(b.name??'').trim().slice(0,60);
- if(name.length<2)return json({error:'Add a group name.'},400);
+ if(name.length<2)return json({error:'Please add a group name.'},400);
  if(['admin center','all staff center'].includes(name.toLowerCase()))return json({error:'That name is reserved for a protected center.'},409);
  const r=await env.DB.prepare('INSERT INTO conversations(name,type,created_by,created_at) VALUES(?,?,?,?)').bind(name,b.type,user.id,Date.now()).run();
  const id=Number(r.meta.last_row_id);
@@ -39,17 +39,17 @@ export async function POST(req:Request){
 
 export async function PATCH(req:Request){
  const user=await me();
- if(!user)return json({error:'Open the site again.'},401);
+ if(!user)return json({error:'Please open the site again before continuing.'},401);
  const b=await req.json() as {conversationId?:number;memberIds?:number[];action?:'add'|'remove'};
  const conversationId=Number(b.conversationId);
  if(!conversationId||conversationId===1)return json({error:'Everyone is already in the main school messaging space.'},400);
  if(!await isMember(user.id,conversationId))return json({error:'You are not in this room.'},403);
  const chat=await env.DB.prepare('SELECT id,name,type,created_by AS createdBy FROM conversations WHERE id=?').bind(conversationId).first<{id:number;name:string;type:string;createdBy:number}>();
- if(!chat)return json({error:'Room not found.'},404);
+ if(!chat)return json({error:'The requested room could not be found.'},404);
  const protectedChat=isProtectedChat(chat.type);
  if(protectedChat&&!canManageProtectedChat(user.role))return json({error:'Only the founder can change people in this protected center.'},403);
  const requested=Array.from(new Set((b.memberIds??[]).map(Number).filter(x=>x>0&&x!==user.id))).slice(0,49);
- if(!requested.length)return json({error:'Choose at least one person.'},400);
+ if(!requested.length)return json({error:'Please choose at least one person.'},400);
  if(b.action==='remove'){
   if(chat.createdBy!==user.id&&!isStaff(user.role))return json({error:'Only the room creator or staff can remove people.'},403);
   const existing=await env.DB.prepare(`SELECT user_id AS userId FROM conversation_members WHERE conversation_id=? AND user_id IN (${requested.map(()=>'?').join(',')})`).bind(conversationId,...requested).all<{userId:number}>();
@@ -79,12 +79,12 @@ export async function PATCH(req:Request){
 
 export async function DELETE(req:Request){
  const user=await me();
- if(!user)return json({error:'Sign in first.'},401);
+ if(!user)return json({error:'Please sign in before continuing.'},401);
  const body=await req.json() as {conversationId?:number};
  const conversationId=Number(body.conversationId);
  if(!conversationId||conversationId===1)return json({error:'The Main School Room cannot be deleted.'},400);
  const chat=await env.DB.prepare('SELECT id,name,type,created_by AS createdBy FROM conversations WHERE id=?').bind(conversationId).first<{id:number;name:string;type:string;createdBy:number}>();
- if(!chat)return json({error:'Room not found.'},404);
+ if(!chat)return json({error:'The requested room could not be found.'},404);
  if(isProtectedChat(chat.type))return json({error:'Protected centers can never be deleted.'},403);
  if(chat.type!=='group')return json({error:'Only group rooms can be deleted.'},400);
  if(chat.createdBy!==user.id)return json({error:'Only the person who created this group can delete it.'},403);

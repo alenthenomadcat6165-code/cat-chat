@@ -7,7 +7,7 @@ async function allowed(userId:number,conversationId:number){
 
 export async function GET(req:Request){
  const user=await me();
- if(!user)return json({error:'Sign in first.'},401);
+ if(!user)return json({error:'Please sign in before continuing.'},401);
  const conversationId=Number(new URL(req.url).searchParams.get('conversationId')??1);
  if(!await allowed(user.id,conversationId))return json({error:'You are not in this room.'},403);
  const activeSince=Date.now()-4500;
@@ -17,7 +17,7 @@ export async function GET(req:Request){
 
 export async function POST(req:Request){
  const user=await me();
- if(!user)return json({error:'Sign in first.'},401);
+ if(!user)return json({error:'Please sign in before continuing.'},401);
  const body=await req.json() as {conversationId?:number;typing?:boolean};
  const conversationId=Number(body.conversationId??1);
  if(!await allowed(user.id,conversationId))return json({error:'You are not in this room.'},403);

@@ -13,7 +13,7 @@ const replies:Record<SafetyCategory,string>={
  bullying:'That message was not sent because it may be bullying or hurtful.',
  threat:'That message was not sent because threats or dangerous messages are not allowed.',
  sexual:'That message was not sent because sexual or explicit content is not allowed.',
- privacy:'That message was not sent because it looks like private contact information. Keep phone numbers and email addresses private.',
+ privacy:'That message was not sent because it looks like private contact information. Phone numbers and email addresses should remain private.',
  security:'That message was not sent because scripts, hacking attempts, or unsafe code are not allowed in Cat Thing.'
 };
 

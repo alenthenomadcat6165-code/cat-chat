@@ -3,7 +3,7 @@ import {me} from '../../../../lib/store';
 
 export async function GET(_:Request,{params}:{params:Promise<{id:string}>}){
  const user=await me();
- if(!user)return new Response('Sign in first.',{status:401});
+ if(!user)return new Response('Please sign in before continuing.',{status:401});
  const {id}=await params;
  const message=await env.DB.prepare(`SELECT messages.attachment_key AS attachmentKey,messages.attachment_type AS attachmentType,messages.attachment_name AS attachmentName,messages.conversation_id AS conversationId,messages.deleted_at AS deletedAt FROM messages WHERE messages.id=?`).bind(Number(id)).first<{attachmentKey:string|null;attachmentType:string|null;attachmentName:string|null;conversationId:number;deletedAt:number|null}>();
  if(!message?.attachmentKey||message.deletedAt)return new Response('Not found',{status:404});

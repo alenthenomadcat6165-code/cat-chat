@@ -17,10 +17,10 @@ async function allowed(userId:number,conversationId:number){
 export async function POST(req:Request){
  await setup();
  const user=await me();
- if(!user)return json({error:'Sign in first.'},401);
+ if(!user)return json({error:'Please sign in before continuing.'},401);
  const form=await req.formData();
  const file=form.get('file'),conversationId=Number(form.get('conversationId')??1),body=String(form.get('body')??'').trim().slice(0,500);
- if(!(file instanceof File))return json({error:'Choose a file to share.'},400);
+ if(!(file instanceof File))return json({error:'Please choose a file to share.'},400);
  if(!await allowed(user.id,conversationId))return json({error:'You are not in this room.'},403);
  const maximum=limits[file.type];
  if(!maximum)return json({error:'Share a JPG, PNG, WebP, GIF, MP4, WebM, MOV, MP3, M4A, WAV, OGG, or PDF file.'},400);
