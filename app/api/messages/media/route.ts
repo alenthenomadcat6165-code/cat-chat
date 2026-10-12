@@ -21,7 +21,7 @@ export async function POST(req:Request){
  const form=await req.formData();
  const file=form.get('file'),conversationId=Number(form.get('conversationId')??1),body=String(form.get('body')??'').trim().slice(0,500);
  if(!(file instanceof File))return json({error:'Choose a file to share.'},400);
- if(!await allowed(user.id,conversationId))return json({error:'You are not in this chat.'},403);
+ if(!await allowed(user.id,conversationId))return json({error:'You are not in this room.'},403);
  const maximum=limits[file.type];
  if(!maximum)return json({error:'Share a JPG, PNG, WebP, GIF, MP4, WebM, MOV, MP3, M4A, WAV, OGG, or PDF file.'},400);
  if(file.size<1||file.size>maximum)return json({error:`That file is too large. The limit is ${Math.round(maximum/1_000_000)} MB.`},400);

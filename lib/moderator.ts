@@ -63,7 +63,7 @@ export async function runModeratorSweep():Promise<ModeratorResult>{
   for(const [userId,categories] of affected){
    const actorId=founder?.id??userId,summary=`Automatic moderator removed message content for: ${[...categories].join(', ')}.`;
    actions.push(env.DB.prepare('INSERT INTO moderation_actions(actor_id,target_id,action,details,created_at) VALUES(?,?,?,?,?)').bind(actorId,userId,'automatic_moderator',summary,now));
-   if(!spamUsers.has(userId)){actions.push(env.DB.prepare('INSERT INTO warnings(user_id,issued_by,message,created_at) VALUES(?,?,?,?)').bind(userId,actorId,'The automatic moderator removed a message that broke the Cat Chat safety rules.',now));actions.push(env.DB.prepare('UPDATE users SET warnings_count=warnings_count+1 WHERE id=?').bind(userId))}
+   if(!spamUsers.has(userId)){actions.push(env.DB.prepare('INSERT INTO warnings(user_id,issued_by,message,created_at) VALUES(?,?,?,?)').bind(userId,actorId,'The automatic moderator removed a message that broke the Cat Thing safety rules.',now));actions.push(env.DB.prepare('UPDATE users SET warnings_count=warnings_count+1 WHERE id=?').bind(userId))}
   }
   for(let index=0;index<actions.length;index+=50)await env.DB.batch(actions.slice(index,index+50));
  }

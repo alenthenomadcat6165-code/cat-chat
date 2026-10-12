@@ -3,8 +3,8 @@ import {getModeratorStatus,runModeratorSweep} from '../../lib/moderator';
 const protocolVersion='2026-07-28';
 type RpcRequest={jsonrpc?:unknown;id?:unknown;method?:unknown;params?:{name?:unknown}};
 const tools=[
- {name:'moderate_chat_now',description:'Run the Cat Chat automatic safety moderator. It checks recent visible messages for profanity, bullying, threats, spam, unsafe scripts, and hacking payloads, then removes violations using fixed server-side rules.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
- {name:'get_moderator_status',description:'Read the most recent Cat Chat automatic moderator result without exposing message content or account details.',inputSchema:{type:'object',properties:{},additionalProperties:false}}
+ {name:'moderate_chat_now',description:'Run the Cat Thing automatic safety moderator. It checks recent visible messages for profanity, bullying, threats, spam, unsafe scripts, and hacking payloads, then removes violations using fixed server-side rules.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
+ {name:'get_moderator_status',description:'Read the most recent Cat Thing automatic moderator result without exposing message content or account details.',inputSchema:{type:'object',properties:{},additionalProperties:false}}
 ];
 
 function reply(id:unknown,result:unknown,status=200){return Response.json({jsonrpc:'2.0',id:id??null,result},{status})}

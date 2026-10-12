@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
   subsets: ['latin'],
 });
 
-export const metadata: Metadata = {title:'The Cat Chat — Fresh Start',description:'A friendly school chat with accounts, profiles, groups, and private reporting.'};
+export const metadata: Metadata = {title:'Cat Thing',description:'A friendly school messaging space with accounts, profiles, groups, and private reporting.'};
 
 export default function RootLayout({
   children,

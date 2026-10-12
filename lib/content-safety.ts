@@ -9,12 +9,12 @@ const blockedWords={
 } as const;
 
 const replies:Record<SafetyCategory,string>={
- language:'That message was not sent because it contains language that is not allowed in Cat Chat.',
+ language:'That message was not sent because it contains language that is not allowed in Cat Thing.',
  bullying:'That message was not sent because it may be bullying or hurtful.',
  threat:'That message was not sent because threats or dangerous messages are not allowed.',
  sexual:'That message was not sent because sexual or explicit content is not allowed.',
  privacy:'That message was not sent because it looks like private contact information. Keep phone numbers and email addresses private.',
- security:'That message was not sent because scripts, hacking attempts, or unsafe code are not allowed in Cat Chat.'
+ security:'That message was not sent because scripts, hacking attempts, or unsafe code are not allowed in Cat Thing.'
 };
 
 const leet:Record<string,string>={'0':'o','1':'i','3':'e','4':'a','5':'s','7':'t','@':'a','$':'s','а':'a','е':'e','і':'i','о':'o','р':'p','с':'c','х':'x','у':'y','α':'a','ε':'e','ι':'i','ο':'o','ρ':'p','χ':'x'};

@@ -6,7 +6,7 @@ export async function POST(req:Request){
  const user=await me();
  if(!user||normalizedRole(user.role)!=='founder')return json({error:'Founder access only.'},403);
  const body=await req.json() as {confirmation?:string};
- if(body.confirmation!=='RESET CAT CHAT')return json({error:'Type RESET CAT CHAT exactly to confirm.'},400);
+ if(body.confirmation!=='RESET CAT THING')return json({error:'Type RESET CAT THING exactly to confirm.'},400);
  await ensureProtectedChats();
  const attachments=await env.DB.prepare("SELECT attachment_key AS attachmentKey FROM messages WHERE attachment_key IS NOT NULL").all<{attachmentKey:string}>();
  const messageCount=await env.DB.prepare('SELECT COUNT(*) AS count FROM messages').first<{count:number}>();
@@ -25,5 +25,5 @@ export async function POST(req:Request){
  ]);
  await ensureProtectedChats();
  await deleteStoredFiles(attachments.results.map(item=>item.attachmentKey)).catch(()=>{});
- return json({ok:true,message:`Cat Chat restarted. ${messageCount?.count??0} messages and ${chatCount?.count??0} chats were cleared. Every account was preserved.`});
+ return json({ok:true,message:`Cat Thing restarted. ${messageCount?.count??0} messages and ${chatCount?.count??0} rooms were cleared. Every account was preserved.`});
 }
