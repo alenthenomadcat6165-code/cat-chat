@@ -26,7 +26,7 @@ export async function PATCH(req:Request){
  if(action==='role'){
   if(actorRole!=='founder')return json({error:'Only the founder can choose staff roles.'},403);
   const next=body.role??'';
-  if(!['member','admin','secretary','staff'].includes(next))return json({error:'Please choose a valid role.'},400);
+  if(!['member','suggester','admin','secretary','staff'].includes(next))return json({error:'Please choose a valid role.'},400);
   if(targetRole==='founder')return json({error:'The founder role is protected.'},403);
   await env.DB.batch([
    env.DB.prepare('UPDATE users SET role=? WHERE id=?').bind(next,userId),

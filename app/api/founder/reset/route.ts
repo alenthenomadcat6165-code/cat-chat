@@ -10,7 +10,7 @@ export async function POST(req:Request){
  await ensureProtectedChats();
  const attachments=await env.DB.prepare("SELECT attachment_key AS attachmentKey FROM messages WHERE attachment_key IS NOT NULL").all<{attachmentKey:string}>();
  const messageCount=await env.DB.prepare('SELECT COUNT(*) AS count FROM messages').first<{count:number}>();
- const chatCount=await env.DB.prepare("SELECT COUNT(*) AS count FROM conversations WHERE type NOT IN ('main','admin_center','staff_center')").first<{count:number}>();
+ const chatCount=await env.DB.prepare("SELECT COUNT(*) AS count FROM conversations WHERE type NOT IN ('main','admin_center','staff_center','suggester_center')").first<{count:number}>();
  const now=Date.now();
  await env.DB.batch([
   env.DB.prepare('DELETE FROM reports'),
@@ -19,8 +19,8 @@ export async function POST(req:Request){
   env.DB.prepare('DELETE FROM call_sessions'),
   env.DB.prepare('DELETE FROM typing_presence'),
   env.DB.prepare('DELETE FROM messages'),
-  env.DB.prepare("DELETE FROM conversation_members WHERE conversation_id IN (SELECT id FROM conversations WHERE type NOT IN ('main','admin_center','staff_center'))"),
-  env.DB.prepare("DELETE FROM conversations WHERE type NOT IN ('main','admin_center','staff_center')"),
+  env.DB.prepare("DELETE FROM conversation_members WHERE conversation_id IN (SELECT id FROM conversations WHERE type NOT IN ('main','admin_center','staff_center','suggester_center'))"),
+  env.DB.prepare("DELETE FROM conversations WHERE type NOT IN ('main','admin_center','staff_center','suggester_center')"),
   env.DB.prepare('INSERT INTO moderation_actions(actor_id,target_id,action,details,created_at) VALUES(?,?,?,?,?)').bind(user.id,user.id,'restart_chat',`${messageCount?.count??0} messages; ${chatCount?.count??0} chats`,now)
  ]);
  await ensureProtectedChats();
