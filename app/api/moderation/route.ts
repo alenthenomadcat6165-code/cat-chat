@@ -1,20 +1,26 @@
 import {env} from 'cloudflare:workers';
-import {canModerate,isStaff,json,me,normalizedRole,roleRank,setup} from '../../../lib/store';
+import {customRoleId,getCustomRoles,isStaff,json,mayModerateRole,me,normalizedRole,rolePrivileges,setup} from '../../../lib/store';
 
 type Action='role'|'warn'|'suspend'|'pause'|'ban'|'restore';
 
 export async function GET(){
  await setup();
  const actor=await me();
- if(!actor||!isStaff(actor.role))return json({error:'You must be a staff member to use this feature.'},403);
- const users=await env.DB.prepare(`SELECT id,username,name,avatar_key AS avatarKey,role,account_status AS accountStatus,suspended_until AS suspendedUntil,warnings_count AS warningsCount,created_at AS createdAt FROM users WHERE banned=0 AND account_status!='banned' ORDER BY created_at ASC,id ASC`).all();
- return json({me:{id:actor.id,role:normalizedRole(actor.role)},users:users.results});
+ if(!actor)return json({error:'Please sign in before continuing.'},401);
+ const privileges=await rolePrivileges(actor.role);
+ if(!isStaff(actor.role)&&!Object.values(privileges).some(Boolean))return json({error:'You do not have moderation access.'},403);
+ const canListAccounts=privileges.viewAccountDetails||privileges.warnAccounts||privileges.suspendDays>0||privileges.pauseAccounts||privileges.banAccounts;
+ const users=canListAccounts?await env.DB.prepare(`SELECT id,username,name,avatar_key AS avatarKey,role,account_status AS accountStatus,suspended_until AS suspendedUntil,warnings_count AS warningsCount,created_at AS createdAt FROM users WHERE banned=0 AND account_status!='banned' ORDER BY created_at ASC,id ASC`).all():{results:[]};
+ const roles=await getCustomRoles();
+ return json({me:{id:actor.id,role:normalizedRole(actor.role),privileges},users:users.results,customRoles:normalizedRole(actor.role)==='founder'?roles:roles.map(({id,name,color})=>({id,name,color}))});
 }
 
 export async function PATCH(req:Request){
  await setup();
  const actor=await me();
- if(!actor||!isStaff(actor.role))return json({error:'You must be a staff member to use this feature.'},403);
+ if(!actor)return json({error:'Please sign in before continuing.'},401);
+ const privileges=await rolePrivileges(actor.role);
+ if(!isStaff(actor.role)&&!Object.values(privileges).some(Boolean))return json({error:'You do not have moderation access.'},403);
  const body=await req.json() as {userId?:number;action?:Action;role?:string;reason?:string;days?:number};
  const userId=Number(body.userId),action=body.action;
  if(!userId||!action)return json({error:'Please choose a person and an action.'},400);
@@ -26,7 +32,10 @@ export async function PATCH(req:Request){
  if(action==='role'){
   if(actorRole!=='founder')return json({error:'Only the founder can choose staff roles.'},403);
   const next=body.role??'';
-  if(!['member','suggester','admin','secretary','staff'].includes(next))return json({error:'Please choose a valid role.'},400);
+  if(!['member','suggester','admin','secretary','staff'].includes(next)){
+   const id=customRoleId(next);
+   if(!id||!await env.DB.prepare('SELECT 1 FROM custom_roles WHERE id=?').bind(id).first())return json({error:'Please choose a valid role.'},400);
+  }
   if(targetRole==='founder')return json({error:'The founder role is protected.'},403);
   await env.DB.batch([
    env.DB.prepare('UPDATE users SET role=? WHERE id=?').bind(next,userId),
@@ -35,9 +44,10 @@ export async function PATCH(req:Request){
   return json({ok:true,message:`${target.name} is now ${next==='member'?'a member':next}.`});
  }
 
- if(!canModerate(actorRole,targetRole))return json({error:'You can only moderate accounts below your staff level.'},403);
+ if(!mayModerateRole(actorRole,targetRole))return json({error:'You can only moderate accounts below your staff level.'},403);
  const reason=(body.reason??'').trim().slice(0,500);
  if(action==='warn'){
+  if(!privileges.warnAccounts)return json({error:'Your role cannot warn accounts.'},403);
   if(!reason)return json({error:'Please write a reason for the warning.'},400);
   await env.DB.batch([
    env.DB.prepare('INSERT INTO warnings(user_id,issued_by,message,created_at) VALUES(?,?,?,?)').bind(userId,actor.id,reason,now),
@@ -47,9 +57,10 @@ export async function PATCH(req:Request){
   return json({ok:true,message:`A warning was sent to ${target.name}.`});
  }
  if(action==='suspend'){
+  if(!privileges.suspendDays)return json({error:'Your role cannot suspend accounts.'},403);
   if(target.accountStatus!=='active')return json({error:'An admin must restore this account before it can be suspended.'},409);
   const days=Math.floor(Number(body.days));
-  const maximum=actorRole==='staff'?3:actorRole==='secretary'?7:365;
+  const maximum=privileges.suspendDays;
   if(!days||days<1||days>maximum)return json({error:`Please choose a suspension length between 1 and ${maximum} days.`},400);
   const until=now+days*86400000;
   await env.DB.batch([
@@ -60,7 +71,7 @@ export async function PATCH(req:Request){
   return json({ok:true,message:`${target.name} is suspended for ${days} day${days===1?'':'s'}.`});
  }
  if(action==='pause'){
-  if(roleRank(actorRole)<2)return json({error:'Members with the Staff/Orderly role are not permitted to pause accounts.'},403);
+  if(!privileges.pauseAccounts)return json({error:'Your role cannot pause accounts.'},403);
   if(target.accountStatus==='banned')return json({error:'Restore the banned account before changing its status.'},409);
   await env.DB.batch([
    env.DB.prepare("UPDATE users SET account_status='paused',suspended_until=NULL,banned=0 WHERE id=?").bind(userId),
@@ -70,7 +81,7 @@ export async function PATCH(req:Request){
   return json({ok:true,message:`${target.name} is paused.`});
  }
  if(action==='ban'){
-  if(roleRank(actorRole)<3)return json({error:'Only members with the Admin role are permitted to ban accounts.'},403);
+  if(!privileges.banAccounts)return json({error:'Your role cannot ban accounts.'},403);
   await env.DB.batch([
    env.DB.prepare("UPDATE users SET account_status='banned',suspended_until=NULL,banned=1 WHERE id=?").bind(userId),
    env.DB.prepare('DELETE FROM sessions WHERE user_id=?').bind(userId),
@@ -79,9 +90,10 @@ export async function PATCH(req:Request){
   return json({ok:true,message:`${target.name} is banned.`});
  }
  if(action==='restore'){
+  if(!privileges.suspendDays&&!privileges.pauseAccounts)return json({error:'Your role cannot restore accounts.'},403);
   if(target.accountStatus==='banned')return json({error:'Bans are permanent and cannot be removed.'},403);
   if(!['paused','suspended'].includes(target.accountStatus))return json({error:'This account is already active.'},409);
-  if(actorRole==='staff'&&target.accountStatus!=='suspended')return json({error:'Members with the Staff/Orderly role can restore suspended accounts, but they cannot restore paused accounts.'},403);
+  if(target.accountStatus==='paused'&&!privileges.pauseAccounts)return json({error:'Your role cannot restore paused accounts.'},403);
   await env.DB.batch([
    env.DB.prepare("UPDATE users SET account_status='active',suspended_until=NULL,banned=0 WHERE id=?").bind(userId),
    env.DB.prepare('INSERT INTO moderation_actions(actor_id,target_id,action,details,created_at) VALUES(?,?,?,?,?)').bind(actor.id,userId,'restore','',now)

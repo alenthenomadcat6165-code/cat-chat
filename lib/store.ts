@@ -9,6 +9,23 @@ export const isStaff=(role:string)=>staffRoles.includes(normalizedRole(role) as 
 const roleRanks:Record<string,number>={member:0,staff:1,secretary:2,admin:3,founder:4};
 export const roleRank=(role:string)=>roleRanks[normalizedRole(role)]??0;
 export const canModerate=(actorRole:string,targetRole:string)=>isStaff(actorRole)&&roleRank(actorRole)>roleRank(targetRole);
+export type RolePrivileges={deleteMessages:boolean;viewDeletedMessages:boolean;warnAccounts:boolean;suspendDays:number;pauseAccounts:boolean;banAccounts:boolean;viewAccountDetails:boolean;reviewReports:boolean;manageRoomMembers:boolean};
+export type CustomRole={id:number;name:string;color:string;privileges:RolePrivileges};
+const emptyPrivileges:RolePrivileges={deleteMessages:false,viewDeletedMessages:false,warnAccounts:false,suspendDays:0,pauseAccounts:false,banAccounts:false,viewAccountDetails:false,reviewReports:false,manageRoomMembers:false};
+export function customRoleId(role:string){const match=/^custom:([1-9]\d*)$/.exec(role);return match?Number(match[1]):null}
+export async function getCustomRoles(){const rows=await env.DB.prepare('SELECT id,name,color,privileges FROM custom_roles ORDER BY created_at,id').all<{id:number;name:string;color:string;privileges:string}>();return rows.results.map(row=>({...row,privileges:{...emptyPrivileges,...JSON.parse(row.privileges)}})) as CustomRole[]}
+export async function rolePrivileges(role:string):Promise<RolePrivileges>{
+ const normalized=normalizedRole(role);
+ if(normalized==='founder')return {deleteMessages:true,viewDeletedMessages:true,warnAccounts:true,suspendDays:365,pauseAccounts:true,banAccounts:true,viewAccountDetails:true,reviewReports:true,manageRoomMembers:true};
+ if(normalized==='admin')return {deleteMessages:true,viewDeletedMessages:true,warnAccounts:true,suspendDays:365,pauseAccounts:true,banAccounts:true,viewAccountDetails:true,reviewReports:true,manageRoomMembers:true};
+ if(normalized==='secretary')return {deleteMessages:true,viewDeletedMessages:false,warnAccounts:true,suspendDays:7,pauseAccounts:true,banAccounts:false,viewAccountDetails:true,reviewReports:true,manageRoomMembers:true};
+ if(normalized==='staff')return {deleteMessages:true,viewDeletedMessages:false,warnAccounts:true,suspendDays:3,pauseAccounts:false,banAccounts:false,viewAccountDetails:false,reviewReports:true,manageRoomMembers:true};
+ const id=customRoleId(normalized);
+ if(!id)return {...emptyPrivileges};
+ const row=await env.DB.prepare('SELECT privileges FROM custom_roles WHERE id=?').bind(id).first<{privileges:string}>();
+ return row?{...emptyPrivileges,...JSON.parse(row.privileges)}:{...emptyPrivileges};
+}
+export function mayModerateRole(actorRole:string,targetRole:string){return customRoleId(actorRole)?['member','suggester'].includes(targetRole):canModerate(actorRole,targetRole)}
 export async function hash(password:string,salt:string){const raw=new TextEncoder().encode(salt+password);const out=await crypto.subtle.digest('SHA-256',raw);return [...new Uint8Array(out)].map(x=>x.toString(16).padStart(2,'0')).join('')}
 export async function setup(){await env.DB.batch([
  env.DB.prepare('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, name TEXT NOT NULL, password_hash TEXT NOT NULL, salt TEXT NOT NULL, avatar_key TEXT, role TEXT NOT NULL DEFAULT \'member\', banned INTEGER NOT NULL DEFAULT 0, account_status TEXT NOT NULL DEFAULT \'active\', suspended_until INTEGER, warnings_count INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)'),
@@ -21,7 +38,8 @@ export async function setup(){await env.DB.batch([
  env.DB.prepare('CREATE TABLE IF NOT EXISTS call_participants (call_id INTEGER NOT NULL, user_id INTEGER NOT NULL, joined_at INTEGER NOT NULL, last_seen INTEGER NOT NULL, left_at INTEGER, PRIMARY KEY(call_id,user_id))'),
  env.DB.prepare('CREATE TABLE IF NOT EXISTS call_signals (id INTEGER PRIMARY KEY AUTOINCREMENT, call_id INTEGER NOT NULL, from_user_id INTEGER NOT NULL, to_user_id INTEGER NOT NULL, type TEXT NOT NULL, payload TEXT NOT NULL, created_at INTEGER NOT NULL)'),
  env.DB.prepare('CREATE TABLE IF NOT EXISTS user_presence (user_id INTEGER PRIMARY KEY, updated_at INTEGER NOT NULL)'),
- env.DB.prepare('CREATE TABLE IF NOT EXISTS moderator_status (id INTEGER PRIMARY KEY CHECK(id=1), last_run_at INTEGER NOT NULL, checked_count INTEGER NOT NULL DEFAULT 0, removed_count INTEGER NOT NULL DEFAULT 0, banned_count INTEGER NOT NULL DEFAULT 0, summary TEXT NOT NULL DEFAULT \'\')')
+ env.DB.prepare('CREATE TABLE IF NOT EXISTS moderator_status (id INTEGER PRIMARY KEY CHECK(id=1), last_run_at INTEGER NOT NULL, checked_count INTEGER NOT NULL DEFAULT 0, removed_count INTEGER NOT NULL DEFAULT 0, banned_count INTEGER NOT NULL DEFAULT 0, summary TEXT NOT NULL DEFAULT \'\')'),
+ env.DB.prepare('CREATE TABLE IF NOT EXISTS custom_roles (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, color TEXT NOT NULL, privileges TEXT NOT NULL, created_at INTEGER NOT NULL)')
 ])}
 export async function me(){const jar=await cookies(),token=jar.get('cat_session_v2')?.value;if(!token)return null;const user=await env.DB.prepare('SELECT users.id,users.username,users.name,users.avatar_key AS avatarKey,users.role,users.banned,users.account_status AS accountStatus,users.suspended_until AS suspendedUntil FROM sessions JOIN users ON users.id=sessions.user_id WHERE sessions.token=? AND sessions.expires_at>?').bind(token,Date.now()).first<{id:number;username:string;name:string;avatarKey:string|null;role:string;banned:number;accountStatus:string;suspendedUntil:number|null}>();if(!user)return null;if(user.role==='creator'){await env.DB.prepare("UPDATE users SET role='founder' WHERE id=?").bind(user.id).run();user.role='founder'}if(user.accountStatus==='suspended'&&user.suspendedUntil&&user.suspendedUntil<=Date.now()){await env.DB.prepare("UPDATE users SET account_status='active',suspended_until=NULL WHERE id=?").bind(user.id).run();user.accountStatus='active';user.suspendedUntil=null}if(user.accountStatus!=='active'||user.banned)return null;return user}
 export function session(token:string,remember=false){return `cat_session_v2=${token}; Path=/; HttpOnly; Secure; SameSite=Lax${remember?'; Max-Age=2592000':''}`}

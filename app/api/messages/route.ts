@@ -1,5 +1,5 @@
 import {env} from 'cloudflare:workers';
-import {clearSession,isStaff,json,me,setup} from '../../../lib/store';
+import {clearSession,json,me,normalizedRole,rolePrivileges,setup} from '../../../lib/store';
 import {checkMessageSafety} from '../../../lib/content-safety';
 import {checkInlineSpam,checkSpam,permanentlyBanForSpam} from '../../../lib/spam-safety';
 
@@ -17,14 +17,15 @@ export async function GET(req:Request){
  const user=await me();
  if(!user)return json({error:'Please open the site again before continuing.'},401);
  const u=new URL(req.url),conversationId=Number(u.searchParams.get('conversationId')??1);
- if(!await allowed(user.id,conversationId))return json({error:'You are not a member of this room.'},403);
- const r=await env.DB.prepare(`SELECT * FROM (SELECT messages.id,CASE WHEN messages.deleted_at IS NULL THEN messages.body ELSE '' END AS body,messages.created_at AS createdAt,messages.edited_at AS editedAt,messages.deleted_at AS deletedAt,CASE WHEN messages.deleted_at IS NULL THEN messages.attachment_type ELSE NULL END AS attachmentType,CASE WHEN messages.deleted_at IS NULL THEN messages.attachment_name ELSE NULL END AS attachmentName,CASE WHEN messages.deleted_at IS NULL THEN messages.attachment_size ELSE NULL END AS attachmentSize,CASE WHEN messages.deleted_at IS NULL AND messages.attachment_key IS NOT NULL THEN messages.id ELSE NULL END AS attachmentId,users.id AS userId,users.name,users.avatar_key AS avatarKey,users.role FROM messages JOIN users ON users.id=messages.user_id WHERE messages.conversation_id=? ORDER BY messages.id DESC LIMIT 200) ORDER BY id`).bind(conversationId).all();
+ if(!await allowed(user.id,conversationId)&&normalizedRole(user.role)!=='founder')return json({error:'You are not a member of this room.'},403);
+ const canSeeDeleted=(await rolePrivileges(user.role)).viewDeletedMessages;
+ const r=await env.DB.prepare(`SELECT * FROM (SELECT messages.id,CASE WHEN messages.deleted_at IS NULL OR ?=1 THEN messages.body ELSE '' END AS body,messages.created_at AS createdAt,messages.edited_at AS editedAt,messages.deleted_at AS deletedAt,CASE WHEN messages.deleted_at IS NULL OR ?=1 THEN messages.attachment_type ELSE NULL END AS attachmentType,CASE WHEN messages.deleted_at IS NULL OR ?=1 THEN messages.attachment_name ELSE NULL END AS attachmentName,CASE WHEN messages.deleted_at IS NULL OR ?=1 THEN messages.attachment_size ELSE NULL END AS attachmentSize,CASE WHEN (messages.deleted_at IS NULL OR ?=1) AND messages.attachment_key IS NOT NULL THEN messages.id ELSE NULL END AS attachmentId,users.id AS userId,users.name,users.avatar_key AS avatarKey,users.role FROM messages JOIN users ON users.id=messages.user_id WHERE messages.conversation_id=? ORDER BY messages.id DESC LIMIT 200) ORDER BY id`).bind(...Array(5).fill(canSeeDeleted?1:0),conversationId).all();
  return json({messages:r.results});
 }
 
 export async function POST(req:Request){const user=await me();if(!user)return json({error:'Please open the site again before continuing.'},401);const {body,conversationId=1}=await req.json() as {body?:string;conversationId?:number};if(!await allowed(user.id,conversationId))return json({error:'You are not a member of this room.'},403);const text=(body??'').trim();if(!text||text.length>500)return json({error:'Please write between 1 and 500 characters.'},400);const spam=await spamResponse(user,text);if(spam)return spam;const safety=checkMessageSafety(text);if(!safety.allowed)return json({error:safety.message,blocked:true},422);const r=await env.DB.prepare('INSERT INTO messages(user_id,body,created_at,conversation_id) VALUES(?,?,?,?)').bind(user.id,text,Date.now(),conversationId).run();return json({id:r.meta.last_row_id})}
 
-export async function PATCH(req:Request){const user=await me();if(!user)return json({error:'Please sign in before continuing.'},401);const {id,body}=await req.json() as {id?:number;body?:string};const text=(body??'').trim();if(!id||!text||text.length>500)return json({error:'Please write between 1 and 500 characters.'},400);const spam=await spamResponse(user,text,false);if(spam)return spam;const safety=checkMessageSafety(text);if(!safety.allowed)return json({error:safety.message,blocked:true},422);const r=await env.DB.prepare('UPDATE messages SET body=?,edited_at=? WHERE id=? AND user_id=? AND deleted_at IS NULL').bind(text,Date.now(),id,user.id).run();if(!r.meta.changes)return json({error:'You can only edit your own message.'},403);return json({ok:true})}
+export async function PATCH(req:Request){const user=await me();if(!user)return json({error:'Please sign in before continuing.'},401);const {id,body}=await req.json() as {id?:number;body?:string};const text=(body??'').trim();if(!id||!text||text.length>500)return json({error:'Please write between 1 and 500 characters.'},400);const message=await env.DB.prepare('SELECT conversation_id AS conversationId FROM messages WHERE id=?').bind(id).first<{conversationId:number}>();if(!message||!await allowed(user.id,message.conversationId))return json({error:'You are not a member of this room.'},403);const spam=await spamResponse(user,text,false);if(spam)return spam;const safety=checkMessageSafety(text);if(!safety.allowed)return json({error:safety.message,blocked:true},422);const r=await env.DB.prepare('UPDATE messages SET body=?,edited_at=? WHERE id=? AND user_id=? AND deleted_at IS NULL').bind(text,Date.now(),id,user.id).run();if(!r.meta.changes)return json({error:'You can only edit your own message.'},403);return json({ok:true})}
 
 export async function DELETE(req:Request){
  const user=await me();
@@ -33,9 +34,11 @@ export async function DELETE(req:Request){
  const ids=Array.from(new Set([...(Array.isArray(body.ids)?body.ids:[]),...(body.id?[body.id]:[])].map(Number).filter(id=>id>0))).slice(0,50);
  if(!ids.length)return json({error:'Please choose at least one message.'},400);
  const placeholders=ids.map(()=>'?').join(',');
- const found=await env.DB.prepare(`SELECT id,user_id AS userId FROM messages WHERE id IN (${placeholders}) AND deleted_at IS NULL`).bind(...ids).all<{id:number;userId:number}>();
+ const found=await env.DB.prepare(`SELECT id,user_id AS userId,conversation_id AS conversationId FROM messages WHERE id IN (${placeholders}) AND deleted_at IS NULL`).bind(...ids).all<{id:number;userId:number;conversationId:number}>();
  if(!found.results.length)return json({error:'Those messages were already deleted or could not be found.'},404);
- if(!isStaff(user.role)&&found.results.some(message=>message.userId!==user.id))return json({error:'Only staff can delete someone else’s message.'},403);
+ const privileges=await rolePrivileges(user.role);
+ if(found.results.some(message=>message.userId!==user.id)&&!privileges.deleteMessages)return json({error:'Your role cannot delete someone else’s message.'},403);
+ if(normalizedRole(user.role)!=='founder'&&await Promise.all(found.results.map(message=>allowed(user.id,message.conversationId))).then(results=>results.some(result=>!result)))return json({error:'You are not a member of this room.'},403);
  const now=Date.now();
  const statements=[env.DB.prepare(`UPDATE messages SET deleted_at=? WHERE id IN (${found.results.map(()=>'?').join(',')}) AND deleted_at IS NULL`).bind(now,...found.results.map(message=>message.id))];
  for(const message of found.results)if(message.userId!==user.id)statements.push(env.DB.prepare('INSERT INTO moderation_actions(actor_id,target_id,action,details,created_at) VALUES(?,?,?,?,?)').bind(user.id,message.userId,'delete_message',String(message.id),now));

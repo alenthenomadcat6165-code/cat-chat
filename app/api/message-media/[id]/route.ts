@@ -1,13 +1,14 @@
 import {env} from 'cloudflare:workers';
-import {me} from '../../../../lib/store';
+import {me,normalizedRole,rolePrivileges} from '../../../../lib/store';
 
 export async function GET(_:Request,{params}:{params:Promise<{id:string}>}){
  const user=await me();
  if(!user)return new Response('Please sign in before continuing.',{status:401});
  const {id}=await params;
  const message=await env.DB.prepare(`SELECT messages.attachment_key AS attachmentKey,messages.attachment_type AS attachmentType,messages.attachment_name AS attachmentName,messages.conversation_id AS conversationId,messages.deleted_at AS deletedAt FROM messages WHERE messages.id=?`).bind(Number(id)).first<{attachmentKey:string|null;attachmentType:string|null;attachmentName:string|null;conversationId:number;deletedAt:number|null}>();
- if(!message?.attachmentKey||message.deletedAt)return new Response('Not found',{status:404});
- if(message.conversationId!==1){
+ if(!message?.attachmentKey)return new Response('Not found',{status:404});
+ if(message.deletedAt&&!(await rolePrivileges(user.role)).viewDeletedMessages)return new Response('Not found',{status:404});
+ if(message.conversationId!==1&&normalizedRole(user.role)!=='founder'){
   const member=await env.DB.prepare('SELECT 1 FROM conversation_members WHERE conversation_id=? AND user_id=?').bind(message.conversationId,user.id).first();
   if(!member)return new Response('Not allowed',{status:403});
  }
@@ -20,7 +21,7 @@ export async function GET(_:Request,{params}:{params:Promise<{id:string}>}){
   'content-type':type,
   'content-length':String(object.size),
   'content-disposition':`${inline?'inline':'attachment'}; filename="${safeName}"`,
-  'cache-control':'private,max-age=3600',
+  'cache-control':'private,no-store',
   'x-content-type-options':'nosniff'
  }});
 }

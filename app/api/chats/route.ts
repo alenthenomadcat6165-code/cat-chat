@@ -1,5 +1,5 @@
 import {env} from 'cloudflare:workers';
-import {isStaff,json,me} from '../../../lib/store';
+import {json,me,normalizedRole,rolePrivileges} from '../../../lib/store';
 import {canManageProtectedChat,deleteStoredFiles,ensureProtectedChats,isProtectedChat} from '../../../lib/protected-chats';
 
 async function isMember(userId:number,conversationId:number){
@@ -12,12 +12,12 @@ export async function GET(req:Request){
  await ensureProtectedChats();
  const conversationId=Number(new URL(req.url).searchParams.get('conversationId'));
  if(!conversationId||conversationId===1)return json({error:'Please choose a group or private room.'},400);
- if(!await isMember(user.id,conversationId))return json({error:'You are not in this room.'},403);
+ if(!await isMember(user.id,conversationId)&&normalizedRole(user.role)!=='founder')return json({error:'You are not in this room.'},403);
  const chat=await env.DB.prepare('SELECT id,name,type,created_by AS createdBy,created_at AS createdAt FROM conversations WHERE id=?').bind(conversationId).first<{id:number;name:string;type:string;createdBy:number;createdAt:number}>();
  if(!chat)return json({error:'The requested room could not be found.'},404);
  const members=await env.DB.prepare(`SELECT users.id,users.name,users.avatar_key AS avatarKey,users.role FROM conversation_members JOIN users ON users.id=conversation_members.user_id WHERE conversation_members.conversation_id=? AND users.banned=0 AND users.account_status!='banned' ORDER BY users.name COLLATE NOCASE`).bind(conversationId).all();
- const protectedChat=isProtectedChat(chat.type),founderCanManage=canManageProtectedChat(user.role);
- return json({chat:{...chat,protected:protectedChat},members:members.results,meId:user.id,canAddMembers:protectedChat?founderCanManage:true,canManageMembers:protectedChat?founderCanManage:chat.createdBy===user.id||isStaff(user.role)});
+ const protectedChat=isProtectedChat(chat.type),founderCanManage=canManageProtectedChat(user.role),member=await isMember(user.id,conversationId),privileges=await rolePrivileges(user.role);
+ return json({chat:{...chat,protected:protectedChat},members:members.results,meId:user.id,canAddMembers:member&&(protectedChat?founderCanManage:true),canManageMembers:member&&(protectedChat?founderCanManage:chat.createdBy===user.id||privileges.manageRoomMembers)});
 }
 
 export async function POST(req:Request){
@@ -51,7 +51,7 @@ export async function PATCH(req:Request){
  const requested=Array.from(new Set((b.memberIds??[]).map(Number).filter(x=>x>0&&x!==user.id))).slice(0,49);
  if(!requested.length)return json({error:'Please choose at least one person.'},400);
  if(b.action==='remove'){
-  if(chat.createdBy!==user.id&&!isStaff(user.role))return json({error:'Only the room creator or staff can remove people.'},403);
+  if(chat.createdBy!==user.id&&!(await rolePrivileges(user.role)).manageRoomMembers)return json({error:'Only the room creator or authorized staff can remove people.'},403);
   const existing=await env.DB.prepare(`SELECT user_id AS userId FROM conversation_members WHERE conversation_id=? AND user_id IN (${requested.map(()=>'?').join(',')})`).bind(conversationId,...requested).all<{userId:number}>();
   const removeIds=existing.results.map(row=>row.userId);
   if(!removeIds.length)return json({error:'Those people are not in this room.'},404);

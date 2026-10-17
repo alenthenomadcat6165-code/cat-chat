@@ -1,10 +1,10 @@
 import {env} from 'cloudflare:workers';
-import {isStaff,json,me,setup} from '../../../lib/store';
+import {json,me,rolePrivileges,setup} from '../../../lib/store';
 
 export async function GET(){
  await setup();
  const user=await me();
- if(!user||!isStaff(user.role))return json({error:'You must be a staff member to use this feature.'},403);
+ if(!user||!(await rolePrivileges(user.role)).reviewReports)return json({error:'Your role cannot review reports.'},403);
  const reports=await env.DB.prepare(`SELECT reports.id,reports.reason,reports.details,reports.status,reports.created_at AS createdAt,messages.body AS message,messages.user_id AS reportedUserId,reported.name AS reportedName,reported.username AS reportedUsername,reporter.name AS reporterName FROM reports JOIN messages ON messages.id=reports.message_id JOIN users reported ON reported.id=messages.user_id JOIN users reporter ON reporter.id=reports.reporter_id ORDER BY reports.created_at DESC LIMIT 100`).all();
  return json({reports:reports.results});
 }
@@ -23,7 +23,7 @@ export async function POST(req:Request){
 
 export async function PATCH(req:Request){
  const user=await me();
- if(!user||!isStaff(user.role))return json({error:'You must be a staff member to use this feature.'},403);
+ if(!user||!(await rolePrivileges(user.role)).reviewReports)return json({error:'Your role cannot review reports.'},403);
  const b=await req.json() as {id?:number;status?:string};
  if(!b.id||!['new','reviewed'].includes(b.status??''))return json({error:'The requested update is not valid.'},400);
  await env.DB.prepare('UPDATE reports SET status=? WHERE id=?').bind(b.status,b.id).run();
